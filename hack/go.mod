@@ -169,8 +169,9 @@ require (
 	github.com/google/go-cmp v0.5.9 // indirect
 	github.com/google/go-containerregistry v0.15.2 // indirect
 	github.com/google/go-sev-guest v0.8.0 // indirect
+	github.com/google/go-tdx-guest v0.2.1-0.20230907045450-944015509c84 // indirect
 	github.com/google/go-tpm v0.9.0 // indirect
-	github.com/google/go-tpm-tools v0.4.0 // indirect
+	github.com/google/go-tpm-tools v0.4.1 // indirect
 	github.com/google/go-tspi v0.3.0 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/logger v1.1.1 // indirect
