@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: s3proxy
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app: s3proxy
+    template:
+        metadata:
+            labels:
+                app: s3proxy
+        spec:
+          imagePullSecrets:
+          - name: regcred
+          containers:
+          - name: s3proxy
+            image: ghcr.io/derpsteb/constellation/s3proxy@sha256:57dbcf394e1464c07f2ef5c5e7fd1a87d7477c15394faa81601901f6956c06e3
+            args:
+            - "--ip=0.0.0.0"
+            - "--port=443"
+            - "--level=debug"
+            ports:
+            - containerPort: 443
+            volumeMounts:
+            - name: tls-cert-data
+              mountPath: /etc/s3proxy/certs
+            envFrom:
+            - secretRef:
+                name: s3-creds
+          volumes:
+          - name: tls-cert-data
+            secret:
+              secretName: s3proxy-tls
+          - name: s3-creds
+            secret:
+              secretName: s3-creds
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: s3proxy-service
+spec:
+  selector:
+    app: s3proxy
+  ports:
+  - name: https
+    port: 443
+    targetPort: 443
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: s3-creds
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: "replaceme"
+  AWS_SECRET_ACCESS_KEY: "replaceme"
