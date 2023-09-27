@@ -18,8 +18,16 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/edgelesssys/constellation/v2/internal/logger"
+	"github.com/edgelesssys/constellation/v2/s3proxy/internal/crypto"
 )
 
+const (
+	// testingKey is a temporary encryption key used for testing.
+	// TODO (derpsteb): This key needs to be fetched from Constellation's keyservice.
+	testingKey = "01234567890123456789012345678901"
+	// encryptionTag is the key used to tag objects that are encrypted with this proxy. Presence of the key implies the object needs to be decrypted.
+	encryptionTag = "constellation-encryption"
+)
 
 // object bundles data to implement http.Handler methods that use data from incoming requests.
 type object struct {
@@ -73,14 +81,37 @@ func (o object) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	plaintext := body
+	decrypt, ok := data.Metadata[encryptionTag]
+
+	if ok && decrypt == "true" {
+		plaintext, err = crypto.Decrypt(body, []byte(testingKey))
+		if err != nil {
+			o.log.Errorf("GetObject decrypting response", "error", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write(body); err != nil {
+	if _, err := w.Write(plaintext); err != nil {
 		o.log.Errorf("GetObject sending response", "error", err)
 	}
 }
 
 func (o object) put(w http.ResponseWriter, r *http.Request) {
-	output, err := o.client.PutObject(r.Context(), o.bucket, o.key, o.tags, o.contentType, o.objectLockLegalHoldStatus, o.objectLockMode, o.objectLockRetainUntilDate, o.metadata, o.data)
+	ciphertext, err := crypto.Encrypt(o.data, []byte(testingKey))
+	if err != nil {
+		o.log.Errorf("PutObject", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// We need to tag objects that are encrypted with this proxy,
+	// because there might be objects in a bucket that are not encrypted.
+	// GetObject needs to be able to recognize these objects and skip decryption.
+	o.metadata[encryptionTag] = "true"
+
+	output, err := o.client.PutObject(r.Context(), o.bucket, o.key, o.tags, o.contentType, o.objectLockLegalHoldStatus, o.objectLockMode, o.objectLockRetainUntilDate, o.metadata, ciphertext)
 	if err != nil {
 		o.log.Errorf("PutObject sending request to S3", "error", err)
 
