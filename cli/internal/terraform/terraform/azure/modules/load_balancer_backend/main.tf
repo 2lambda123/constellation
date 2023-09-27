@@ -31,7 +31,7 @@ resource "azurerm_lb_rule" "rules" {
   protocol                       = "Tcp"
   frontend_port                  = each.value.port
   backend_port                   = each.value.port
-  frontend_ip_configuration_name = "PublicIPAddress"
+  frontend_ip_configuration_name = var.frontend_ip_configuration_name
   backend_address_pool_ids       = [azurerm_lb_backend_address_pool.backend_pool.id]
   probe_id                       = each.value.id
   disable_outbound_snat          = true

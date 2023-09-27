@@ -17,10 +17,14 @@ package azure
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
+	"net/http"
+	"os/exec"
 	"path"
 	"strconv"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
@@ -29,6 +33,7 @@ import (
 	"github.com/edgelesssys/constellation/v2/internal/cloud/azureshared"
 	"github.com/edgelesssys/constellation/v2/internal/cloud/metadata"
 	"github.com/edgelesssys/constellation/v2/internal/constants"
+	"github.com/edgelesssys/constellation/v2/internal/logger"
 	"github.com/edgelesssys/constellation/v2/internal/role"
 )
 
@@ -102,12 +107,24 @@ func New(ctx context.Context) (*Cloud, error) {
 //
 // The returned string is an IP address without a port, but the method name needs to satisfy the
 // metadata interface.
-func (c *Cloud) GetLoadBalancerEndpoint(ctx context.Context) (host, port string, err error) {
+func (c *Cloud) GetLoadBalancerEndpoint(ctx context.Context) (host, port string, retErr error) {
+	var multiErr error
+
+	// Try to retrieve the public IP first
 	hostname, err := c.getLoadBalancerPublicIP(ctx)
-	if err != nil {
-		return "", "", fmt.Errorf("retrieving load balancer public IP: %w", err)
+	if err == nil {
+		return hostname, strconv.FormatInt(constants.KubernetesPort, 10), nil
 	}
-	return hostname, strconv.FormatInt(constants.KubernetesPort, 10), nil
+	multiErr = fmt.Errorf("retrieving load balancer public IP: %w", err)
+
+	// If that fails, try to retrieve the private IP
+	hostname, err = c.getLoadBalancerPrivateIP(ctx)
+	if err == nil {
+		return hostname, strconv.FormatInt(constants.KubernetesPort, 10), nil
+	}
+	multiErr = errors.Join(multiErr, fmt.Errorf("retrieving load balancer private IP: %w", err))
+
+	return "", "", multiErr
 }
 
 // List retrieves all instances belonging to the current constellation.
@@ -308,6 +325,44 @@ func (c *Cloud) getVMInterfaces(ctx context.Context, vm armcompute.VirtualMachin
 	return networkInterfaces, nil
 }
 
+// getLoadBalancerPrivateIP retrieves the first load balancer IP from cloud provider metadata.
+func (c *Cloud) getLoadBalancerPrivateIP(ctx context.Context) (string, error) {
+	resourceGroup, err := c.imds.resourceGroup(ctx)
+	if err != nil {
+		return "", fmt.Errorf("retrieving resource group: %w", err)
+	}
+	uid, err := c.imds.uid(ctx)
+	if err != nil {
+		return "", fmt.Errorf("retrieving instance UID: %w", err)
+	}
+
+	lb, err := c.getLoadBalancer(ctx, resourceGroup, uid)
+	if err != nil {
+		return "", fmt.Errorf("retrieving load balancer: %w", err)
+	}
+	if lb == nil || lb.Properties == nil {
+		return "", errors.New("could not dereference load balancer IP configuration")
+	}
+
+	var privIP []string
+	for _, fipConf := range lb.Properties.FrontendIPConfigurations {
+		if fipConf == nil || fipConf.Properties == nil || fipConf.Properties.PrivateIPAddress == nil {
+			continue
+		}
+		privIP = append(privIP, *fipConf.Properties.PrivateIPAddress)
+		break
+	}
+	if len(privIP) == 0 {
+		return "", errors.New("could not resolve private IP address reference for load balancer")
+	}
+
+	if len(privIP) != 1 {
+		return "", fmt.Errorf("found %d private IP addresses found for load balancer: %v", len(privIP), privIP)
+	}
+
+	return privIP[0], nil
+}
+
 // getLoadBalancerPublicIP retrieves the first load balancer IP from cloud provider metadata.
 func (c *Cloud) getLoadBalancerPublicIP(ctx context.Context) (string, error) {
 	resourceGroup, err := c.imds.resourceGroup(ctx)
@@ -348,6 +403,9 @@ func (c *Cloud) getLoadBalancerPublicIP(ctx context.Context) (string, error) {
 
 /*
 // TODO(malt3): uncomment and use as soon as we switch the primary endpoint to DNS.
+// Addition from 3u13r: We have to think about how to handle DNS for internal load balancers
+// that only have a private IP address and therefore no DNS name by default.
+//
 // getLoadBalancerDNSName retrieves the dns name of the load balancer.
 // On Azure, the DNS name is the DNS name of the public IP address of the load balancer.
 func (c *Cloud) getLoadBalancerDNSName(ctx context.Context) (string, error) {
@@ -387,6 +445,89 @@ func (c *Cloud) getLoadBalancerDNSName(ctx context.Context) (string, error) {
 	return *resp.Properties.DNSSettings.Fqdn, nil
 }
 */
+
+// PrepareAzureControlPlaneNode sets up iptables for the control plane node only
+// if an internal load balancer is used.
+//
+// This is needed since during `kubeadm init` the API server must talk to the
+// kubeAPIEndpoint, which is the load balancer IP address. During that time, the
+// only healthy VM is the VM itself. Therefore, traffic is sent to the load balancer
+// and the 5-tuple is (VM IP, <some port>, LB IP, 6443, TCP).
+// Now the load balancer does not re-write the source IP address only the destination (DNAT).
+// Therefore the 5-tuple is (VM IP, <some port>, VM IP, 6443, TCP).
+// Now the VM responds to the SYN packet with a SYN-ACK packet, but the outgoing
+// connection waits on a response from the load balancer and not the VM therefore
+// dropping the packet.
+//
+// OpenShift also uses the same mechanism to redirect traffic to the API server:
+// https://github.com/openshift/machine-config-operator/blob/e453bd20bac0e48afa74e9a27665abaf454d93cd/templates/master/00-master/azure/files/opt-libexec-openshift-azure-routes-sh.yaml
+func (c *Cloud) PrepareAzureControlPlaneNode(ctx context.Context, log *logger.Logger) {
+	chainName := "azure-lb-nat"
+
+	selfMetadata, err := c.Self(ctx)
+	if err != nil {
+		log.Fatalf("failed to get self metadata: %v", err)
+	}
+
+	if selfMetadata.Role != role.ControlPlane {
+		log.Infof("not a control plane node, skipping iptables setup")
+		return
+	}
+
+	loadbalancerIP, err := c.getLoadBalancerPrivateIP(ctx)
+	if err != nil {
+		log.Infof("failed to get load balancer private IP: %v", err)
+		return
+	}
+
+	log.Infof("Setting up iptables for control plane node with load balancer IP %s", loadbalancerIP)
+
+	// Wait for the API server to be ready
+	httpClient := http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://localhost:6443/readyz", nil)
+	if err != nil {
+		log.Fatalf("failed to create request: %v", err)
+	}
+
+	for {
+		time.Sleep(5 * time.Second)
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			fmt.Printf("failed to request endpoint: %v\n", err)
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
+			break
+		}
+	}
+
+	// Create the iptables chain
+	out, err := exec.CommandContext(ctx, "iptables", "-w", "-t", "nat", "-N", chainName).CombinedOutput()
+	if err != nil {
+		log.Fatalf("failed to create iptables chain: %w: %s", err, string(out))
+	}
+
+	out, err = exec.CommandContext(ctx, "iptables", "-w", "-t", "nat", "-A", "PREROUTING", "-j", chainName).CombinedOutput()
+	if err != nil {
+		log.Fatalf("failed to add rule to iptables chain: %w: %s", err, string(out))
+	}
+
+	out, err = exec.CommandContext(ctx, "iptables", "-w", "-t", "nat", "-A", "OUTPUT", "-j", chainName).CombinedOutput()
+	if err != nil {
+		log.Fatalf("failed to add rule to iptables chain: %w: %s", err, string(out))
+	}
+
+	out, err = exec.CommandContext(ctx, "iptables", "-w", "-t", "nat", "-A", chainName, "--dst", loadbalancerIP, "-p", "tcp", "--dport", "6443", "-j", "REDIRECT").CombinedOutput()
+	if err != nil {
+		log.Fatalf("failed to add rule to iptables chain: %w: %s", err, string(out))
+	}
+}
 
 // convertToInstanceMetadata converts a armcomputev2.VirtualMachineScaleSetVM to a metadata.InstanceMetadata.
 func convertToInstanceMetadata(vm armcompute.VirtualMachineScaleSetVM, networkInterfaces []armnetwork.Interface,

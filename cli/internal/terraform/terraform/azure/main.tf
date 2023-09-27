@@ -38,7 +38,7 @@ locals {
   cidr_vpc_subnet_pods  = "10.10.0.0/16"
   // wildcard_lb_dns_name is the DNS name of the load balancer with a wildcard for the name.
   // example: given "name-1234567890.location.cloudapp.azure.com" it will return "*.location.cloudapp.azure.com"
-  wildcard_lb_dns_name = replace(data.azurerm_public_ip.loadbalancer_ip.fqdn, "/^[^.]*\\./", "*.")
+  wildcard_lb_dns_name = var.internal_loadbalancer ? "" : replace(data.azurerm_public_ip.loadbalancer_ip[0].fqdn, "/^[^.]*\\./", "*.")
   // deduce from format (subscriptions)/$ID/resourceGroups/$RG/providers/Microsoft.ManagedIdentity/userAssignedIdentities/$NAME"
   // move from the right as to ignore the optional prefixes
   uai_resource_group = element(split("/", var.user_assigned_identity), length(split("/", var.user_assigned_identity)) - 5)
@@ -82,6 +82,7 @@ resource "azurerm_application_insights" "insights" {
 }
 
 resource "azurerm_public_ip" "loadbalancer_ip" {
+  count               = var.internal_loadbalancer ? 0 : 1
   name                = "${local.name}-lb"
   domain_name_label   = local.name
   resource_group_name = var.resource_group
@@ -102,6 +103,7 @@ resource "azurerm_public_ip" "loadbalancer_ip" {
 // resources for clusters created before 2.9. In those cases we need to wait until loadbalancer_ip has
 // been updated before reading from it.
 data "azurerm_public_ip" "loadbalancer_ip" {
+  count               = var.internal_loadbalancer ? 0 : 1
   name                = "${local.name}-lb"
   resource_group_name = var.resource_group
   depends_on          = [azurerm_public_ip.loadbalancer_ip]
@@ -141,17 +143,30 @@ resource "azurerm_lb" "loadbalancer" {
   sku                 = "Standard"
   tags                = local.tags
 
-  frontend_ip_configuration {
-    name                 = "PublicIPAddress"
-    public_ip_address_id = azurerm_public_ip.loadbalancer_ip.id
+  dynamic "frontend_ip_configuration" {
+    for_each = var.internal_loadbalancer ? [] : [1]
+    content {
+      name                 = "PublicIPAddress"
+      public_ip_address_id = azurerm_public_ip.loadbalancer_ip[0].id
+    }
+  }
+
+  dynamic "frontend_ip_configuration" {
+    for_each = var.internal_loadbalancer ? [1] : []
+    content {
+      name                          = "PrivateIPAddress"
+      private_ip_address_allocation = "Dynamic"
+      subnet_id                     = azurerm_subnet.lb_subnet.id
+    }
   }
 }
 
 module "loadbalancer_backend_control_plane" {
   source = "./modules/load_balancer_backend"
 
-  name            = "${local.name}-control-plane"
-  loadbalancer_id = azurerm_lb.loadbalancer.id
+  name                           = "${local.name}-control-plane"
+  loadbalancer_id                = azurerm_lb.loadbalancer.id
+  frontend_ip_configuration_name = azurerm_lb.loadbalancer.frontend_ip_configuration[0].name
   ports = flatten([
     {
       name     = "bootstrapper",
@@ -201,9 +216,10 @@ module "loadbalancer_backend_control_plane" {
 module "loadbalancer_backend_worker" {
   source = "./modules/load_balancer_backend"
 
-  name            = "${local.name}-worker"
-  loadbalancer_id = azurerm_lb.loadbalancer.id
-  ports           = []
+  name                           = "${local.name}-worker"
+  loadbalancer_id                = azurerm_lb.loadbalancer.id
+  frontend_ip_configuration_name = azurerm_lb.loadbalancer.frontend_ip_configuration[0].name
+  ports                          = []
 }
 
 resource "azurerm_lb_backend_address_pool" "all" {
@@ -217,6 +233,14 @@ resource "azurerm_virtual_network" "network" {
   location            = var.location
   address_space       = ["10.0.0.0/8"]
   tags                = local.tags
+}
+
+resource "azurerm_subnet" "loadbalancer_subnet" {
+  count                = var.internal_loadbalancer ? 1 : 0
+  name                 = "${local.name}-lb"
+  resource_group_name  = var.resource_group
+  virtual_network_name = azurerm_virtual_network.network.name
+  address_prefixes     = ["10.10.0.0/16"]
 }
 
 resource "azurerm_subnet" "node_subnet" {

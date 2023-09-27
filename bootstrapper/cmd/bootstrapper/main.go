@@ -125,6 +125,8 @@ func main() {
 		if err != nil {
 			log.With(zap.Error(err)).Fatalf("Failed to set up cloud logger")
 		}
+		go metadata.PrepareAzureControlPlaneNode(ctx, log)
+
 		metadataAPI = metadata
 		clusterInitJoiner = kubernetes.New(
 			"azure", k8sapi.NewKubernetesUtil(), &k8sapi.KubdeadmConfiguration{}, kubectl.NewUninitialized(),

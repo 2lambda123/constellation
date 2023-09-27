@@ -4,6 +4,11 @@ variable "name" {
   description = "Base name of the cluster."
 }
 
+variable "frontend_ip_configuration_name" {
+  type        = string
+  description = "The name of the frontend IP configuration to use for the load balancer."
+}
+
 variable "loadbalancer_id" {
   type        = string
   description = "The ID of the load balancer to add the backend to."
