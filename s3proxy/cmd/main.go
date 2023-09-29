@@ -13,10 +13,11 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
+	"os"
 
-	"github.com/edgelesssys/constellation/v2/internal/logger"
 	"github.com/edgelesssys/constellation/v2/s3proxy/internal/router"
 )
 
@@ -30,7 +31,7 @@ const (
 	// defaultCertLocation is the default location of the TLS certificate.
 	defaultCertLocation = "/etc/s3proxy/certs"
 	// defaultLogLevel is the default log level.
-	defaultLogLevel = 0
+	defaultLogLevel = "info"
 )
 
 func main() {
@@ -40,21 +41,18 @@ func main() {
 	}
 
 	// logLevel can be made a public variable so logging level can be changed dynamically.
-	// TODO (derpsteb): enable once we are on go 1.21.
-	// logLevel := new(slog.LevelVar)
-	// handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})
-	// logger := slog.New(handler)
-	// logLevel.Set(flags.logLevel)
-
-	logger := logger.New(logger.JSONLog, logger.VerbosityFromInt(flags.logLevel))
+	logLevel := new(slog.LevelVar)
+	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})
+	logger := slog.New(handler)
+	logLevel.Set(flags.logLevel)
 
 	if err := runServer(flags, logger); err != nil {
 		panic(err)
 	}
 }
 
-func runServer(flags cmdFlags, log *logger.Logger) error {
-	log.Infof("listening", "ip", flags.ip, "port", flags.port, "region", flags.region)
+func runServer(flags cmdFlags, log *slog.Logger) error {
+	log.Info("listening", "ip", flags.ip, "port", flags.port, "region", flags.region)
 
 	router := router.New(flags.region, log)
 
@@ -81,7 +79,7 @@ func runServer(flags cmdFlags, log *logger.Logger) error {
 		return server.ListenAndServeTLS("", "")
 	}
 
-	log.Warnf("TLS is disabled")
+	log.Warn("TLS is disabled")
 	return server.ListenAndServe()
 }
 
@@ -90,7 +88,7 @@ func parseFlags() (cmdFlags, error) {
 	ip := flag.String("ip", defaultIP, "ip to listen on")
 	region := flag.String("region", defaultRegion, "AWS region in which target bucket is located")
 	certLocation := flag.String("cert", defaultCertLocation, "location of TLS certificate")
-	level := flag.Int("level", defaultLogLevel, "log level")
+	level := flag.String("level", defaultLogLevel, "log level")
 
 	flag.Parse()
 
@@ -100,12 +98,12 @@ func parseFlags() (cmdFlags, error) {
 	}
 
 	// TODO(derpsteb): enable once we are on go 1.21.
-	// logLevel := new(slog.Level)
-	// if err := logLevel.UnmarshalText([]byte(*level)); err != nil {
-	// 	return cmdFlags{}, fmt.Errorf("parsing log level: %w", err)
-	// }
+	logLevel := new(slog.Level)
+	if err := logLevel.UnmarshalText([]byte(*level)); err != nil {
+		return cmdFlags{}, fmt.Errorf("parsing log level: %w", err)
+	}
 
-	return cmdFlags{port: *port, ip: netIP.String(), region: *region, certLocation: *certLocation, logLevel: *level}, nil
+	return cmdFlags{port: *port, ip: netIP.String(), region: *region, certLocation: *certLocation, logLevel: *logLevel}, nil
 }
 
 type cmdFlags struct {
@@ -113,7 +111,5 @@ type cmdFlags struct {
 	ip           string
 	region       string
 	certLocation string
-	// TODO(derpsteb): enable once we are on go 1.21.
-	// logLevel slog.Level
-	logLevel int
+	logLevel     slog.Level
 }

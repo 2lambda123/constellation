@@ -21,6 +21,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -29,7 +30,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/edgelesssys/constellation/v2/internal/logger"
 	"github.com/edgelesssys/constellation/v2/s3proxy/internal/s3"
 )
 
@@ -41,11 +41,11 @@ var (
 // Router implements the interception logic for the s3proxy.
 type Router struct {
 	region string
-	log    *logger.Logger
+	log    *slog.Logger
 }
 
 // New creates a new Router.
-func New(region string, log *logger.Logger) Router {
+func New(region string, log *slog.Logger) Router {
 	return Router{region: region, log: log}
 }
 
@@ -96,10 +96,10 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 		parts := strings.Split(req.Host, ".")
 		bucket := parts[0]
 
-		r.log.Debugf("intercepting", "path", req.URL.Path, "method", req.Method, "host", req.Host)
+		r.log.Debug("intercepting", "path", req.URL.Path, "method", req.Method, "host", req.Host)
 		body, err := io.ReadAll(req.Body)
 		if err != nil {
-			r.log.Errorf("PutObject", "error", err)
+			r.log.Error("PutObject", "error", err)
 			http.Error(w, fmt.Sprintf("reading body: %s", err.Error()), http.StatusInternalServerError)
 			return
 		}
@@ -113,12 +113,12 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 		// calculate the correct digest for the new body and NOT get an error.
 		// Thus we have to check incoming requets for matching content digests.
 		if clientDigest != "" && clientDigest != serverDigest {
-			r.log.Debugf("PutObject", "error", "x-amz-content-sha256 mismatch")
+			r.log.Debug("PutObject", "error", "x-amz-content-sha256 mismatch")
 			// The S3 API responds with an XML formatted error message.
 			mismatchErr := NewContentSHA256MismatchError(clientDigest, serverDigest)
 			marshalled, err := xml.Marshal(mismatchErr)
 			if err != nil {
-				r.log.Errorf("PutObject", "error", err)
+				r.log.Error("PutObject", "error", err)
 				http.Error(w, fmt.Sprintf("marshalling error: %s", err.Error()), http.StatusInternalServerError)
 				return
 			}
@@ -132,14 +132,14 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 		raw := req.Header.Get("x-amz-object-lock-retain-until-date")
 		retentionTime, err := parseRetentionTime(raw)
 		if err != nil {
-			r.log.Errorf("parsing lock retention time", "data", raw, "error", err.Error())
+			r.log.Error("parsing lock retention time", "data", raw, "error", err.Error())
 			http.Error(w, fmt.Sprintf("parsing x-amz-object-lock-retain-until-date: %s", err.Error()), http.StatusInternalServerError)
 			return
 		}
 
 		err = validateContentMD5(req.Header.Get("content-md5"), body)
 		if err != nil {
-			r.log.Errorf("validating content md5", "error", err.Error())
+			r.log.Error("validating content md5", "error", err.Error())
 			http.Error(w, fmt.Sprintf("validating content md5: %s", err.Error()), http.StatusBadRequest)
 			return
 		}
@@ -162,10 +162,10 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 		h = put(obj.put)
 
 	case !containsBucket(req.Host) && match(path, "/([^/?]+)/(.+)", &bucket, &key) && req.Method == "PUT" && !isUnwantedPutEndpoint(req.Header, req.URL.Query()):
-		r.log.Debugf("intercepting", "path", req.URL.Path, "method", req.Method, "host", req.Host)
+		r.log.Debug("intercepting", "path", req.URL.Path, "method", req.Method, "host", req.Host)
 		body, err := io.ReadAll(req.Body)
 		if err != nil {
-			r.log.Errorf("PutObject", "error", err)
+			r.log.Error("PutObject", "error", err)
 			http.Error(w, fmt.Sprintf("reading body: %s", err.Error()), http.StatusInternalServerError)
 			return
 		}
@@ -179,12 +179,12 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 		// calculate the correct digest for the new body and NOT get an error.
 		// Thus we have to check incoming requets for matching content digests.
 		if clientDigest != "" && clientDigest != serverDigest {
-			r.log.Debugf("PutObject", "error", "x-amz-content-sha256 mismatch")
+			r.log.Debug("PutObject", "error", "x-amz-content-sha256 mismatch")
 			// The S3 API responds with an XML formatted error message.
 			mismatchErr := NewContentSHA256MismatchError(clientDigest, serverDigest)
 			marshalled, err := xml.Marshal(mismatchErr)
 			if err != nil {
-				r.log.Errorf("PutObject", "error", err)
+				r.log.Error("PutObject", "error", err)
 				http.Error(w, fmt.Sprintf("marshalling error: %s", err.Error()), http.StatusInternalServerError)
 				return
 			}
@@ -198,14 +198,14 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 		raw := req.Header.Get("x-amz-object-lock-retain-until-date")
 		retentionTime, err := parseRetentionTime(raw)
 		if err != nil {
-			r.log.Errorf("parsing lock retention time", "data", raw, "error", err.Error())
+			r.log.Error("parsing lock retention time", "data", raw, "error", err.Error())
 			http.Error(w, fmt.Sprintf("parsing x-amz-object-lock-retain-until-date: %s", err.Error()), http.StatusInternalServerError)
 			return
 		}
 
 		err = validateContentMD5(req.Header.Get("content-md5"), body)
 		if err != nil {
-			r.log.Errorf("validating content md5", "error", err.Error())
+			r.log.Error("validating content md5", "error", err.Error())
 			http.Error(w, fmt.Sprintf("validating content md5: %s", err.Error()), http.StatusBadRequest)
 			return
 		}
@@ -229,14 +229,14 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 
 	// Forward all other requests.
 	default:
-		r.log.Debugf("forwarding", "path", req.URL.Path, "method", req.Method, "host", req.Host, "headers", req.Header)
+		r.log.Debug("forwarding", "path", req.URL.Path, "method", req.Method, "host", req.Host, "headers", req.Header)
 
 		newReq := repackage(req)
 
 		httpClient := http.DefaultClient
 		resp, err := httpClient.Do(&newReq)
 		if err != nil {
-			r.log.Errorf("do request", "error", err)
+			r.log.Error("do request", "error", err)
 			http.Error(w, fmt.Sprintf("do request: %s", err.Error()), http.StatusInternalServerError)
 			return
 		}
@@ -247,7 +247,7 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 		}
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			r.log.Errorf("ReadAll", "error", err)
+			r.log.Error("ReadAll", "error", err)
 			http.Error(w, fmt.Sprintf("reading body: %s", err.Error()), http.StatusInternalServerError)
 			return
 		}
@@ -257,7 +257,7 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 		}
 
 		if _, err := w.Write(body); err != nil {
-			r.log.Errorf("Write", "error", err)
+			r.log.Error("Write", "error", err)
 			http.Error(w, fmt.Sprintf("writing body: %s", err.Error()), http.StatusInternalServerError)
 			return
 		}

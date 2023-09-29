@@ -48,7 +48,7 @@ func NewClient(region string) (*Client, error) {
 
 // GetObject returns the object with the given key from the given bucket.
 // If a versionID is given, the specific version of the object is returned.
-func (c Client) GetObject(ctx context.Context, bucket, key, versionID string) (*s3.GetObjectOutput, error) {
+func (c Client) GetObject(ctx context.Context, bucket, key, versionID, sseCustomerAlgorithm, sseCustomerKey, sseCustomerKeyMD5 string) (*s3.GetObjectOutput, error) {
 	getObjectInput := &s3.GetObjectInput{
 		Bucket: &bucket,
 		Key:    &key,
@@ -56,13 +56,22 @@ func (c Client) GetObject(ctx context.Context, bucket, key, versionID string) (*
 	if versionID != "" {
 		getObjectInput.VersionId = &versionID
 	}
+	if sseCustomerAlgorithm != "" {
+		getObjectInput.SSECustomerAlgorithm = &sseCustomerAlgorithm
+	}
+	if sseCustomerKey != "" {
+		getObjectInput.SSECustomerKey = &sseCustomerKey
+	}
+	if sseCustomerKeyMD5 != "" {
+		getObjectInput.SSECustomerKeyMD5 = &sseCustomerKeyMD5
+	}
 
 	return c.s3client.GetObject(ctx, getObjectInput)
 }
 
 // PutObject creates a new object in the given bucket with the given key and body.
 // Various optional parameters can be set.
-func (c Client) PutObject(ctx context.Context, bucket, key, tags, contentType, objectLockLegalHoldStatus, objectLockMode string, objectLockRetainUntilDate time.Time, metadata map[string]string, body []byte) (*s3.PutObjectOutput, error) {
+func (c Client) PutObject(ctx context.Context, bucket, key, tags, contentType, objectLockLegalHoldStatus, objectLockMode, sseCustomerAlgorithm, sseCustomerKey, sseCustomerKeyMD5 string, objectLockRetainUntilDate time.Time, metadata map[string]string, body []byte) (*s3.PutObjectOutput, error) {
 	// The AWS Go SDK has two versions. V1 does not set the Content-Type header.
 	// V2 always sets the Content-Type header. We use V2.
 	// The s3 API sets an object's content-type to binary/octet-stream if
@@ -86,6 +95,15 @@ func (c Client) PutObject(ctx context.Context, bucket, key, tags, contentType, o
 		ContentMD5:                &encodedContentMD5,
 		ContentType:               &contentType,
 		ObjectLockLegalHoldStatus: types.ObjectLockLegalHoldStatus(objectLockLegalHoldStatus),
+	}
+	if sseCustomerAlgorithm != "" {
+		putObjectInput.SSECustomerAlgorithm = &sseCustomerAlgorithm
+	}
+	if sseCustomerKey != "" {
+		putObjectInput.SSECustomerKey = &sseCustomerKey
+	}
+	if sseCustomerKeyMD5 != "" {
+		putObjectInput.SSECustomerKeyMD5 = &sseCustomerKeyMD5
 	}
 
 	// It is not allowed to only set one of these two properties.
