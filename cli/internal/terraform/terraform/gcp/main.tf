@@ -37,25 +37,18 @@ locals {
     constellation-uid = local.uid,
   }
   ports_node_range      = "30000-32767"
-  ports_kubernetes      = "6443"
-  ports_bootstrapper    = "9000"
-  ports_konnectivity    = "8132"
-  ports_verify          = "30081"
-  ports_recovery        = "9999"
-  ports_join            = "30090"
-  ports_debugd          = "4000"
   cidr_vpc_subnet_nodes = "192.168.178.0/24"
   cidr_vpc_subnet_pods  = "10.10.0.0/16"
   cidr_vpc_subnet_proxy = "192.168.179.0/24"
   cidr_vpc_subnet_ilb   = "192.168.180.0/24"
   kube_env              = "AUTOSCALER_ENV_VARS: kube_reserved=cpu=1060m,memory=1019Mi,ephemeral-storage=41Gi;node_labels=;os=linux;os_distribution=cos;evictionHard="
   control_plane_named_ports = flatten([
-    { name = "kubernetes", port = local.ports_kubernetes, health_check = "HTTPS" },
-    { name = "bootstrapper", port = local.ports_bootstrapper, health_check = "TCP" },
-    { name = "verify", port = local.ports_verify, health_check = "TCP" },
-    { name = "konnectivity", port = local.ports_konnectivity, health_check = "TCP" },
-    { name = "recovery", port = local.ports_recovery, health_check = "TCP" },
-    { name = "join", port = local.ports_join, health_check = "TCP" },
+    { name = "kubernetes", port = "6443", health_check = "HTTPS" },
+    { name = "bootstrapper", port = "9000", health_check = "TCP" },
+    { name = "verify", port = "30081", health_check = "TCP" },
+    { name = "konnectivity", port = "8132", health_check = "TCP" },
+    { name = "recovery", port = "9999", health_check = "TCP" },
+    { name = "join", port = "30090", health_check = "TCP" },
     var.debug ? [{ name = "debugd", port = local.ports_debugd, health_check = "TCP" }] : [],
   ])
   node_groups_by_role = {
@@ -139,13 +132,7 @@ resource "google_compute_firewall" "firewall_external" {
   allow {
     protocol = "tcp"
     ports = flatten([
-      local.ports_node_range,
-      local.ports_bootstrapper,
-      local.ports_kubernetes,
-      local.ports_konnectivity,
-      local.ports_recovery,
-      local.ports_join,
-      var.debug ? [local.ports_debugd] : [],
+      [for port in local.control_plane_named_ports : port.port],
       var.internal_loadbalancer ? [22] : [],
     ])
   }
@@ -254,6 +241,15 @@ module "loadbalancer_internal" {
   backend_subnet = google_compute_subnetwork.ilb_subnet[0].id
 }
 
+module "jump_host" {
+  source         = "./modules/jump_host"
+  base_name      = local.name
+  zone           = var.zone
+  subnetwork     = google_compute_subnetwork.vpc_subnetwork.id
+  labels         = local.labels
+  lb_internal_ip = google_compute_address.loadbalancer_ip_internal[0].address
+  ports          = [for port in local.control_plane_named_ports : port.port]
+}
 moved {
   from = module.loadbalancer_boot
   to   = module.loadbalancer_public["bootstrapper"]

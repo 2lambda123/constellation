@@ -72,6 +72,6 @@ variable "custom_endpoint" {
 
 variable "internal_loadbalancer" {
   type        = bool
-  default     = false
+  default     = true
   description = "Use an internal load balancer."
 }

@@ -54,6 +54,6 @@ variable "custom_endpoint" {
 
 variable "internal_loadbalancer" {
   type        = bool
-  default     = false
+  default     = true
   description = "Enable internal load balancer. This can only be enabled if the control-plane is deployed in one zone."
 }
