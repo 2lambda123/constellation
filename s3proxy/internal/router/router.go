@@ -73,6 +73,11 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 		parts := strings.Split(req.Host, ".")
 		bucket := parts[0]
 
+		if req.Header.Get("Range") != "" {
+			r.log.Error("GetObject Range header unsupported")
+			http.Error(w, "s3proxy currently does not support Range headers", http.StatusNotImplemented)
+		}
+
 		obj := object{
 			client: client,
 			key:    key,
@@ -82,6 +87,11 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 		}
 		h = get(obj.get)
 	case !containsBucket(req.Host) && match(path, "/([^/?]+)/(.+)", &bucket, &key) && req.Method == "GET" && !isGetObjectX(req.URL.Query()):
+		if req.Header.Get("Range") != "" {
+			r.log.Error("GetObject Range header unsupported")
+			http.Error(w, "s3proxy currently does not support Range headers", http.StatusNotImplemented)
+		}
+
 		obj := object{
 			client: client,
 			key:    key,
