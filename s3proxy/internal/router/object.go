@@ -42,6 +42,9 @@ type object struct {
 	objectLockLegalHoldStatus string
 	objectLockMode            string
 	objectLockRetainUntilDate time.Time
+	sseCustomerAlgorithm      string
+	sseCustomerKey            string
+	sseCustomerKeyMD5         string
 	log                       *slog.Logger
 }
 
@@ -54,7 +57,7 @@ func (o object) get(w http.ResponseWriter, r *http.Request) {
 		versionID = []string{""}
 	}
 
-	data, err := o.client.GetObject(r.Context(), o.bucket, o.key, versionID[0])
+	output, err := o.client.GetObject(r.Context(), o.bucket, o.key, versionID[0], o.sseCustomerAlgorithm, o.sseCustomerKey, o.sseCustomerKeyMD5)
 	if err != nil {
 		// log with Info as it might be expected behavior (e.g. object not found).
 		o.log.Error("GetObject sending request to S3", "error", err)
@@ -70,11 +73,38 @@ func (o object) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if data.ETag != nil {
-		w.Header().Set("ETag", strings.Trim(*data.ETag, "\""))
+	if output.ETag != nil {
+		w.Header().Set("ETag", strings.Trim(*output.ETag, "\""))
+	}
+	if output.Expiration != nil {
+		w.Header().Set("x-amz-expiration", *output.Expiration)
+	}
+	if output.ChecksumCRC32 != nil {
+		w.Header().Set("x-amz-checksum-crc32", *output.ChecksumCRC32)
+	}
+	if output.ChecksumCRC32C != nil {
+		w.Header().Set("x-amz-checksum-crc32c", *output.ChecksumCRC32C)
+	}
+	if output.ChecksumSHA1 != nil {
+		w.Header().Set("x-amz-checksum-sha1", *output.ChecksumSHA1)
+	}
+	if output.ChecksumSHA256 != nil {
+		w.Header().Set("x-amz-checksum-sha256", *output.ChecksumSHA256)
+	}
+	if output.SSECustomerAlgorithm != nil {
+		w.Header().Set("x-amz-server-side-encryption-customer-algorithm", *output.SSECustomerAlgorithm)
+	}
+	if output.SSECustomerKeyMD5 != nil {
+		w.Header().Set("x-amz-server-side-encryption-customer-key-MD5", *output.SSECustomerKeyMD5)
+	}
+	if output.SSEKMSKeyId != nil {
+		w.Header().Set("x-amz-server-side-encryption-aws-kms-key-id", *output.SSEKMSKeyId)
+	}
+	if output.ServerSideEncryption != "" {
+		w.Header().Set("x-amz-server-side-encryption-context", string(output.ServerSideEncryption))
 	}
 
-	body, err := io.ReadAll(data.Body)
+	body, err := io.ReadAll(output.Body)
 	if err != nil {
 		o.log.Error("GetObject reading S3 response", "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -82,7 +112,7 @@ func (o object) get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	plaintext := body
-	decrypt, ok := data.Metadata[encryptionTag]
+	decrypt, ok := output.Metadata[encryptionTag]
 
 	if ok && decrypt == "true" {
 		plaintext, err = crypto.Decrypt(body, []byte(testingKey))
@@ -111,7 +141,7 @@ func (o object) put(w http.ResponseWriter, r *http.Request) {
 	// GetObject needs to be able to recognize these objects and skip decryption.
 	o.metadata[encryptionTag] = "true"
 
-	output, err := o.client.PutObject(r.Context(), o.bucket, o.key, o.tags, o.contentType, o.objectLockLegalHoldStatus, o.objectLockMode, o.objectLockRetainUntilDate, o.metadata, ciphertext)
+	output, err := o.client.PutObject(r.Context(), o.bucket, o.key, o.tags, o.contentType, o.objectLockLegalHoldStatus, o.objectLockMode, o.sseCustomerAlgorithm, o.sseCustomerKey, o.sseCustomerKeyMD5, o.objectLockRetainUntilDate, o.metadata, ciphertext)
 	if err != nil {
 		o.log.Error("PutObject sending request to S3", "error", err)
 
@@ -132,7 +162,7 @@ func (o object) put(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("x-amz-version-id", *output.VersionId)
 	}
 	if output.ETag != nil {
-		w.Header().Set("ETag", *output.ETag)
+		w.Header().Set("ETag", strings.Trim(*output.ETag, "\""))
 	}
 	if output.Expiration != nil {
 		w.Header().Set("x-amz-expiration", *output.Expiration)
@@ -180,6 +210,6 @@ func parseErrorCode(err error) int {
 }
 
 type s3Client interface {
-	GetObject(ctx context.Context, bucket, key, versionID string) (*s3.GetObjectOutput, error)
-	PutObject(ctx context.Context, bucket, key, tags, contentType, objectLockLegalHoldStatus, objectLockMode string, objectLockRetainUntilDate time.Time, metadata map[string]string, body []byte) (*s3.PutObjectOutput, error)
+	GetObject(ctx context.Context, bucket, key, versionID, sseCustomerAlgorithm, sseCustomerKey, sseCustomerKeyMD5 string) (*s3.GetObjectOutput, error)
+	PutObject(ctx context.Context, bucket, key, tags, contentType, objectLockLegalHoldStatus, objectLockMode, sseCustomerAlgorithm, sseCustomerKey, sseCustomerKeyMD5 string, objectLockRetainUntilDate time.Time, metadata map[string]string, body []byte) (*s3.PutObjectOutput, error)
 }

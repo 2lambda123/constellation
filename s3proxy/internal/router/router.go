@@ -79,11 +79,14 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 		}
 
 		obj := object{
-			client: client,
-			key:    key,
-			bucket: bucket,
-			query:  req.URL.Query(),
-			log:    r.log,
+			client:               client,
+			key:                  key,
+			bucket:               bucket,
+			query:                req.URL.Query(),
+			sseCustomerAlgorithm: req.Header.Get("x-amz-server-side-encryption-customer-algorithm"),
+			sseCustomerKey:       req.Header.Get("x-amz-server-side-encryption-customer-key"),
+			sseCustomerKeyMD5:    req.Header.Get("x-amz-server-side-encryption-customer-key-MD5"),
+			log:                  r.log,
 		}
 		h = get(obj.get)
 	case !containsBucket(req.Host) && match(path, "/([^/?]+)/(.+)", &bucket, &key) && req.Method == "GET" && !isGetObjectX(req.URL.Query()):
@@ -93,11 +96,14 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 		}
 
 		obj := object{
-			client: client,
-			key:    key,
-			bucket: bucket,
-			query:  req.URL.Query(),
-			log:    r.log,
+			client:               client,
+			key:                  key,
+			bucket:               bucket,
+			query:                req.URL.Query(),
+			sseCustomerAlgorithm: req.Header.Get("x-amz-server-side-encryption-customer-algorithm"),
+			sseCustomerKey:       req.Header.Get("x-amz-server-side-encryption-customer-key"),
+			sseCustomerKeyMD5:    req.Header.Get("x-amz-server-side-encryption-customer-key-MD5"),
+			log:                  r.log,
 		}
 		h = get(obj.get)
 
@@ -122,7 +128,8 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 		// If the client intentionally sends a mismatching content digest, we would take the client request, rewrap it,
 		// calculate the correct digest for the new body and NOT get an error.
 		// Thus we have to check incoming requets for matching content digests.
-		if clientDigest != "" && clientDigest != serverDigest {
+		// UNSIGNED-PAYLOAD can be used to disabled payload signing. In that case we don't check the content digest.
+		if clientDigest != "" && clientDigest != "UNSIGNED-PAYLOAD" && clientDigest != serverDigest {
 			r.log.Debug("PutObject", "error", "x-amz-content-sha256 mismatch")
 			// The S3 API responds with an XML formatted error message.
 			mismatchErr := NewContentSHA256MismatchError(clientDigest, serverDigest)
@@ -166,6 +173,9 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 			objectLockLegalHoldStatus: req.Header.Get("x-amz-object-lock-legal-hold"),
 			objectLockMode:            req.Header.Get("x-amz-object-lock-mode"),
 			objectLockRetainUntilDate: retentionTime,
+			sseCustomerAlgorithm:      req.Header.Get("x-amz-server-side-encryption-customer-algorithm"),
+			sseCustomerKey:            req.Header.Get("x-amz-server-side-encryption-customer-key"),
+			sseCustomerKeyMD5:         req.Header.Get("x-amz-server-side-encryption-customer-key-MD5"),
 			log:                       r.log,
 		}
 
@@ -188,7 +198,8 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 		// If the client intentionally sends a mismatching content digest, we would take the client request, rewrap it,
 		// calculate the correct digest for the new body and NOT get an error.
 		// Thus we have to check incoming requets for matching content digests.
-		if clientDigest != "" && clientDigest != serverDigest {
+		// UNSIGNED-PAYLOAD can be used to disabled payload signing. In that case we don't check the content digest.
+		if clientDigest != "" && clientDigest != "UNSIGNED-PAYLOAD" && clientDigest != serverDigest {
 			r.log.Debug("PutObject", "error", "x-amz-content-sha256 mismatch")
 			// The S3 API responds with an XML formatted error message.
 			mismatchErr := NewContentSHA256MismatchError(clientDigest, serverDigest)
@@ -232,6 +243,9 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 			objectLockLegalHoldStatus: req.Header.Get("x-amz-object-lock-legal-hold"),
 			objectLockMode:            req.Header.Get("x-amz-object-lock-mode"),
 			objectLockRetainUntilDate: retentionTime,
+			sseCustomerAlgorithm:      req.Header.Get("x-amz-server-side-encryption-customer-algorithm"),
+			sseCustomerKey:            req.Header.Get("x-amz-server-side-encryption-customer-key"),
+			sseCustomerKeyMD5:         req.Header.Get("x-amz-server-side-encryption-customer-key-MD5"),
 			log:                       r.log,
 		}
 
