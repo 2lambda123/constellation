@@ -56,7 +56,7 @@ func NewFromIDFile(idFile clusterid.File) *State {
 			UID:               idFile.UID,
 			ClusterEndpoint:   idFile.IP,
 			APIServerCertSANs: idFile.APIServerCertSANs,
-			InitSecret:        string(idFile.InitSecret),
+			InitSecret:        idFile.InitSecret,
 		})
 
 	if idFile.AttestationURL != "" {
@@ -116,7 +116,7 @@ type ClusterValues struct {
 type Infrastructure struct {
 	UID               string   `yaml:"uid"`
 	ClusterEndpoint   string   `yaml:"clusterEndpoint"`
-	InitSecret        string   `yaml:"initSecret"`
+	InitSecret        []byte   `yaml:"initSecret"`
 	APIServerCertSANs []string `yaml:"apiServerCertSANs"`
 	Azure             *Azure   `yaml:"azure,omitempty"`
 	GCP               *GCP     `yaml:"gcp,omitempty"`

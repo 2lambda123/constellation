@@ -38,11 +38,13 @@ func TestUpgradeApply(t *testing.T) {
 		SetInfrastructure(state.Infrastructure{
 			APIServerCertSANs: []string{},
 			UID:               "uid",
+			InitSecret:        []byte{0x42},
 		}).
 		SetClusterValues(state.ClusterValues{MeasurementSalt: []byte{0x41}})
 	defaultIdFile := clusterid.File{
 		MeasurementSalt: []byte{0x41},
 		UID:             "uid",
+		InitSecret:      []byte{0x42},
 	}
 	fsWithIdFile := func() file.Handler {
 		fh := file.NewHandler(afero.NewMemMapFs())

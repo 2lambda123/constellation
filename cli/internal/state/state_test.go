@@ -22,7 +22,7 @@ var defaultState = &State{
 	Infrastructure: Infrastructure{
 		UID:             "123",
 		ClusterEndpoint: "test-cluster-endpoint",
-		InitSecret:      "test-init-secret",
+		InitSecret:      []byte{0x41},
 		APIServerCertSANs: []string{
 			"api-server-cert-san-test",
 			"api-server-cert-san-test-2",
