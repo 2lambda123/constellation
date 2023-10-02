@@ -3,6 +3,7 @@ module github.com/edgelesssys/constellation/v2
 go 1.21
 
 replace (
+	github.com/tink-crypto/tink-go/v2 v2.0.0 => github.com/derpsteb/tink-go/v2 v2.0.0-20231002051717-a808e454eed6
 	k8s.io/api v0.0.0 => k8s.io/api v0.27.2
 	k8s.io/apiextensions-apiserver v0.0.0 => k8s.io/apiextensions-apiserver v0.27.2
 	k8s.io/apimachinery v0.0.0 => k8s.io/apimachinery v0.27.2
@@ -108,6 +109,7 @@ require (
 	github.com/spf13/cobra v1.7.0
 	github.com/stretchr/testify v1.8.4
 	github.com/theupdateframework/go-tuf v0.5.2
+	github.com/tink-crypto/tink-go/v2 v2.0.0
 	go.uber.org/goleak v1.2.1
 	go.uber.org/zap v1.26.0
 	golang.org/x/crypto v0.13.0

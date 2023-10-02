@@ -10,11 +10,18 @@ It decides which packages to forward and which to intercept.
 
 The routing logic in this file is taken from this blog post: https://benhoyt.com/writings/go-routing/#regex-switch.
 We should be able to replace this once this is part of the stdlib: https://github.com/golang/go/issues/61410.
+
+If the router intercepts a PutObject request it will encrypt the body before forwarding it to the S3 API.
+The stored object will have a tag that holds an encrypted data encryption key (DEK).
+That DEK is used to encrypt the object's body.
+The DEK is generated randomly for each PutObject request.
+The DEK is encrypted with a key encryption key (KEK) fetched from Constellation's keyservice.
 */
 package router
 
 import (
 	"bytes"
+	"context"
 	"crypto/md5"
 	"crypto/sha256"
 	"encoding/base64"
@@ -30,7 +37,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/edgelesssys/constellation/v2/s3proxy/internal/kms"
 	"github.com/edgelesssys/constellation/v2/s3proxy/internal/s3"
+)
+
+// Use a 32*8 = 256 bit key for AES-256.
+const (
+	kekSize = 32
+	kekID   = "s3proxy-kek"
 )
 
 var (
@@ -41,12 +55,24 @@ var (
 // Router implements the interception logic for the s3proxy.
 type Router struct {
 	region string
+	kek    []byte
 	log    *slog.Logger
 }
 
 // New creates a new Router.
-func New(region string, log *slog.Logger) Router {
-	return Router{region: region, log: log}
+func New(region, endpoint string, log *slog.Logger) (Router, error) {
+	kms := kms.New(log, endpoint)
+
+	// Get the key encryption key that encrypts all DEKs.
+	kek, err := kms.GetDataKey(context.Background(), kekID, kekSize)
+	if err != nil {
+		return Router{}, fmt.Errorf("getting KEK: %w", err)
+	}
+	if len(kek) != kekSize {
+		return Router{}, fmt.Errorf("received KEK is %d bytes long, expected %d", len(kek), kekSize)
+	}
+
+	return Router{region: region, kek: kek, log: log}, nil
 }
 
 // Serve implements the routing logic for the s3 proxy.
@@ -79,6 +105,7 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 		}
 
 		obj := object{
+			kek:                  r.kek,
 			client:               client,
 			key:                  key,
 			bucket:               bucket,
@@ -96,6 +123,7 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 		}
 
 		obj := object{
+			kek:                  r.kek,
 			client:               client,
 			key:                  key,
 			bucket:               bucket,
@@ -162,6 +190,7 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 		}
 
 		obj := object{
+			kek:                       r.kek,
 			client:                    client,
 			key:                       key,
 			bucket:                    bucket,
@@ -232,6 +261,7 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 		}
 
 		obj := object{
+			kek:                       r.kek,
 			client:                    client,
 			key:                       key,
 			bucket:                    bucket,

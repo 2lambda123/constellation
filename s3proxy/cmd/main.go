@@ -54,7 +54,10 @@ func main() {
 func runServer(flags cmdFlags, log *slog.Logger) error {
 	log.Info("listening", "ip", flags.ip, "port", flags.port, "region", flags.region)
 
-	router := router.New(flags.region, log)
+	router, err := router.New(flags.region, flags.kmsEndpoint, log)
+	if err != nil {
+		return fmt.Errorf("creating router: %w", err)
+	}
 
 	server := http.Server{
 		Addr:    fmt.Sprintf("%s:%d", flags.ip, flags.port),
@@ -88,6 +91,7 @@ func parseFlags() (cmdFlags, error) {
 	ip := flag.String("ip", defaultIP, "ip to listen on")
 	region := flag.String("region", defaultRegion, "AWS region in which target bucket is located")
 	certLocation := flag.String("cert", defaultCertLocation, "location of TLS certificate")
+	kmsEndpoint := flag.String("kms", "key-service.kube-system:9000", "endpoint of the KMS service to get key encryption keys from")
 	level := flag.String("level", defaultLogLevel, "log level")
 
 	flag.Parse()
@@ -103,7 +107,14 @@ func parseFlags() (cmdFlags, error) {
 		return cmdFlags{}, fmt.Errorf("parsing log level: %w", err)
 	}
 
-	return cmdFlags{port: *port, ip: netIP.String(), region: *region, certLocation: *certLocation, logLevel: *logLevel}, nil
+	return cmdFlags{
+		port:         *port,
+		ip:           netIP.String(),
+		region:       *region,
+		certLocation: *certLocation,
+		kmsEndpoint:  *kmsEndpoint,
+		logLevel:     *logLevel,
+	}, nil
 }
 
 type cmdFlags struct {
@@ -111,5 +122,6 @@ type cmdFlags struct {
 	ip           string
 	region       string
 	certLocation string
+	kmsEndpoint  string
 	logLevel     slog.Level
 }
