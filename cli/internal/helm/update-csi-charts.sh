@@ -77,7 +77,7 @@ download_chart "https://github.com/edgelesssys/constellation-aws-ebs-csi-driver"
 download_chart "https://github.com/edgelesssys/constellation-azuredisk-csi-driver" "release-v1.3.0" "charts/edgeless" "azuredisk-csi-driver"
 
 ## GCP CSI Driver
-download_chart "https://github.com/edgelesssys/constellation-gcp-compute-persistent-disk-csi-driver" "v1.2.0" "charts" "gcp-compute-persistent-disk-csi-driver"
+download_chart "https://github.com/edgelesssys/constellation-gcp-compute-persistent-disk-csi-driver" "release-v1.3.0" "charts" "gcp-compute-persistent-disk-csi-driver"
 
 ## OpenStack CSI Driver (cinder)
 download_chart "https://github.com/edgelesssys/constellation-cloud-provider-openstack" "v1.0.0" "charts/cinder-csi-plugin" "openstack-cinder-csi"
